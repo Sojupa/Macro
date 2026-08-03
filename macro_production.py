@@ -401,4 +401,93 @@ def evaluate_conditions(data):
     if net_liq is not None and net_liq_chg is not None:
         if net_liq_chg <= -100.0:
             short_trig.append(f"🔴 [Hidden-A3] Net Liquidity: ${net_liq:,.0f}B (4주간 {net_liq_chg:+.0f}B 급감 — 유동성 축소)")
-            explanations.append("💥 [유동성 축소] 연준 B/S 감소 + TGA 재충전 + RRP 소진
+            explanations.append("💥 [유동성 축소] 연준 B/S 감소 + TGA 재충전 + RRP 소진 겹치며 시중 실질 유동성이 마르는 국면.")
+        elif net_liq_chg >= 100.0:
+            long_trig.append(f"🟢 [Hidden-A3] Net Liquidity: ${net_liq:,.0f}B (4주간 {net_liq_chg:+.0f}B 급증 — 유동성 확장)")
+
+    return short_trig, long_trig, caution_list, explanations
+
+def calculate_macro_composite_score(short_trig, long_trig, leopold_score):
+    base_score = (len(long_trig) * 20) - (len(short_trig) * 15) - (leopold_score * 0.4)
+    macro_score = max(-100, min(100, int(base_score)))
+    
+    if macro_score <= -40:
+        alloc = "🚨 [자산배분 추천: 극강 숏] 주식(KOSPI) 10% | 달러/인버스 50% | 현금 40%"
+    elif macro_score >= 40:
+        alloc = "🚀 [자산배분 추천: 진바닥 롱] KOSPI200/반도체 ETF 80% | 현금 20%"
+    else:
+        alloc = "⚖️ [자산배분 추천: 중립/관망] 주식(KOSPI) 40% | 달러 20% | 현금 40%"
+        
+    return macro_score, alloc
+
+# ==========================================
+# 6. 메인 실행
+# ==========================================
+def run_macro_monitor(mode="MORNING"):
+    print("⚙️ [2/4] 매크로 분석 엔진 가동 중...")
+    data = collect_macro_data()
+    short_trig, long_trig, caution_list, explanations = evaluate_conditions(data)
+    leopold_score, leopold_lvl, leopold_msg = compute_leopold_risk(data)
+    macro_score, alloc_recommendation = calculate_macro_composite_score(short_trig, long_trig, leopold_score)
+    kri_res = evaluate_liquidation_framework()
+    
+    print("📅 [3/4] 오늘/내일 증시 캘린더 수집 중...")
+    calendar_msg = generate_calendar_briefing()
+    
+    u10 = data.get("US10Y", 0)
+    u10_hist = data.get("US10Y_HIST", pd.Series())
+    u10_consec = get_consecutive_days_count(u10_hist, threshold=4.5, condition=">=")
+
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    now_str = datetime.datetime.now().strftime('%H:%M')
+
+    title = "🌅 [글로벌 매크로 & 강제청산 조기경보]" if mode == "MORNING" else "🌆 [글로벌 매크로 & 유동성 종합 리포트]"
+    msg = f"{title} ({today_str} {now_str})\n\n"
+    
+    msg += "📌 [핵심 매크로 수집 Summary]\n"
+    msg += f"• 미 10년물 금리: {u10:.2f}% ({u10_consec}영업일 연속 ≥4.5% 안착)\n"
+    msg += f"• 달러인덱스(DXY): {data.get('DXY', 0):.2f}pt\n"
+    msg += f"• 원/달러 환율: {data.get('USDKRW', 0):.1f}원 (주간: {data.get('USDKRW_WEEK_CHANGE', 0):+.1f}원)\n"
+    msg += f"• SOX 반도체지수: {data.get('SOX', 0):.1f}pt (52주 고점: {data.get('SOX_HIGH_52W', 0):.1f}pt)\n"
+    net_liq = data.get("NET_LIQUIDITY_USD_B")
+    net_liq_chg = data.get("NET_LIQUIDITY_4W_CHANGE_B")
+    if net_liq is not None:
+        chg_str = f" (4주 변화: {net_liq_chg:+.0f}B)" if net_liq_chg is not None else ""
+        msg += f"• Net Liquidity: ${net_liq:,.0f}B{chg_str}\n"
+    msg += "\n"
+
+    msg += calendar_msg + "\n\n"
+
+    if explanations:
+        msg += "💡 [파급 효과 및 영향도 해설]\n" + "\n".join(explanations) + "\n\n"
+
+    if short_trig:
+        msg += "🚨 [발동된 Master 숏 트리거]\n" + "\n".join(short_trig) + "\n\n"
+    if long_trig:
+        msg += "🚀 [발동된 Master 롱 트리거]\n" + "\n".join(long_trig) + "\n\n"
+    if caution_list:
+        msg += "⚠️ [주의: 임계치 접근 유의 지표]\n" + "\n".join(caution_list) + "\n\n"
+
+    msg += f"🎯 [종합 매크로 스코어]: {macro_score}pt / 100pt\n"
+    msg += f"{alloc_recommendation}\n\n"
+
+    msg += f"🚨 [0. 포트폴리오 KRI 조기경보 엔진]: {kri_res['Tier']}\n"
+    msg += f"👉 실행 권고: {kri_res['Actions'][0]}\n\n"
+    
+    msg += f"📊 [포트폴리오 KRI 세부 정량 지표]\n"
+    msg += f"• 증거금 여유율(MC): {kri_res['Margin_Cushion']}%\n"
+    msg += f"• 청산 감내폭(B2L): {kri_res['Buffer_to_Liq']}%\n"
+    msg += f"• 청산 소요 기간(DTL): {kri_res['DTL']}일 (실질 청산가: ${kri_res['Effective_Liq_Price']})\n\n"
+    
+    msg += leopold_msg + "\n"
+
+    print("📤 [4/4] 텔레그램 전송 시도 중...")
+    print("=" * 40)
+    print(msg)
+    print("=" * 40)
+    
+    send_telegram(msg)
+
+if __name__ == "__main__":
+    mode_arg = sys.argv[1] if len(sys.argv) > 1 else "MORNING"
+    run_macro_monitor(mode_arg)
