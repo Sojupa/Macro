@@ -1,4 +1,4 @@
-name: Morning Macro & Liquidity Report
+name: Morning Macro & Advanced Risk Report
 
 on:
   schedule:
@@ -23,7 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install yfinance finance-datareader fredapi beautifulsoup4 pandas numpy requests python-dotenv
 
-      - name: Run Macro Monitor Script
+      - name: Run Macro & Financial Stress Reports
         env:
           PYTHONUNBUFFERED: "1"
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -31,4 +31,8 @@ jobs:
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: |
+          echo "1. 글로벌 매크로 브리핑 실행"
           python macro_production.py MORNING
+          
+          echo "2. 금융 스트레스 & 포지션 정밀 진단 통합 리포트 실행"
+          python financial_stress_report.py
