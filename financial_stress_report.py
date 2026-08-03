@@ -1,7 +1,5 @@
 # ==========================================================
-# financial_stress_report.py - 금융 스트레스 & 포지션 통합 리포터
-# - credit_stress_detector, liquidity_blood_pressure, position_crowded
-#   3개 모듈의 결과를 단 1개의 텔레그램 메시지로 묶어서 전송
+# financial_stress_report.py - 금융 스트레스 & 포지션 통합 리포터 (버그 수정판)
 # ==========================================================
 import os
 import datetime
@@ -69,10 +67,10 @@ def run_combined_financial_stress_report():
         msg += f"• Primary Credit 잔액: ${l_data['PRIMARY_CREDIT_USD_B']:,.1f}B{chg_str}\n"
     msg += "\n"
 
-    # [3] 포지션 과밀도 (COT)
+    # [3] 포지션 과밀도 (COT) - 📌 Z-Score 변수 오타 수정 완료
     msg += "📌 3. 포지션 쏠림 (CFTC COT)\n"
     if "LEV_FUND_NET_SP500" in p_data:
-        z_str = f" ({p_data['LEV_FUND_NET_SP500']:+.1f}σ)" if "LEV_FUND_NET_ZSCORE" in p_data else ""
+        z_str = f" ({p_data['LEV_FUND_NET_ZSCORE']:+.1f}σ)" if "LEV_FUND_NET_ZSCORE" in p_data else ""
         msg += f"• S&P500 선물 순포지션: {p_data['LEV_FUND_NET_SP500']:+,}계약{z_str}\n"
     else:
         msg += "• CFTC COT 포지션: 데이터 수집 대기 중\n"
