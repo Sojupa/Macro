@@ -28,7 +28,7 @@ MONTHLY_DATA = {
 }
 
 # ==========================================
-# 0. 핵심 위험 지표 (KRI) 및 4단계 조기경보 엔진
+# 0. 핵심 위험 지표 (KRI) 엔진
 # ==========================================
 def evaluate_liquidation_framework(
     total_assets: float = 10000000.0,
@@ -74,7 +74,7 @@ def evaluate_liquidation_framework(
     }
 
 # ==========================================
-# 1. 헬퍼 함수 및 데이터 크롤링
+# 1. 헬퍼 함수 및 텔레그램 전송
 # ==========================================
 def fetch_monthly_data_auto(default_monthly_data):
     auto_data = default_monthly_data.copy()
@@ -129,7 +129,57 @@ def send_telegram(text):
         return False
 
 # ==========================================
-# 2. 글로벌 매크로 데이터 수집 (FRED / yfinance)
+# 2. 증시 캘린더 크롤링 모듈 (NEW)
+# ==========================================
+def fetch_market_calendar_events(date_obj):
+    date_param = date_obj.strftime("%Y%m%d")
+    events = []
+    try:
+        schedule_url = f"https://finance.naver.com/news/market_cal.naver?target_date={date_param}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        res = requests.get(schedule_url, headers=headers, timeout=5)
+        
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            rows = soup.select("table.type_5 tr")
+            for row in rows:
+                cols = row.find_all("td")
+                if len(cols) >= 2:
+                    title = cols[0].get_text(strip=True)
+                    desc = cols[1].get_text(strip=True)
+                    if title:
+                        events.append(f"{title} ({desc})" if desc else title)
+    except Exception:
+        pass
+    return events
+
+def generate_calendar_briefing():
+    today = datetime.datetime.now()
+    tomorrow = today + datetime.timedelta(days=1)
+    
+    today_str = today.strftime("%Y-%m-%d")
+    tomorrow_str = tomorrow.strftime("%Y-%m-%d")
+    
+    today_evs = fetch_market_calendar_events(today)
+    tomorrow_evs = fetch_market_calendar_events(tomorrow)
+    
+    msg = "📅 [오늘 & 내일 증시 캘린더]\n"
+    msg += f"• 오늘({today_str}): "
+    if today_evs:
+        msg += ", ".join(today_evs[:3]) + "\n"
+    else:
+        msg += "특이 일정 없음 (또는 데이터 수집 중)\n"
+        
+    msg += f"• 내일({tomorrow_str}): "
+    if tomorrow_evs:
+        msg += ", ".join(tomorrow_evs[:3]) + "\n"
+    else:
+        msg += "특이 일정 없음\n"
+        
+    return msg
+
+# ==========================================
+# 3. 글로벌 매크로 데이터 수집 (FRED / yfinance)
 # ==========================================
 def collect_macro_data():
     data = {}
@@ -204,7 +254,7 @@ def collect_macro_data():
     return data
 
 # ==========================================
-# 3. Leopold 과밀 조기경보 평가
+# 4. Leopold 과밀 조기경보 평가
 # ==========================================
 def compute_leopold_risk(data):
     signals = []
@@ -280,7 +330,7 @@ def compute_leopold_risk(data):
     return score, level, msg
 
 # ==========================================
-# 4. 트리거 및 조건 평가 엔진 (글로벌 매크로 전용)
+# 5. 트리거 및 조건 평가 엔진
 # ==========================================
 def evaluate_conditions(data):
     short_trig, long_trig, caution_list, explanations = [], [], [], []
@@ -327,92 +377,4 @@ def evaluate_conditions(data):
 
     pmi = monthly.get("ISM_PMI", 46.8)
     pmi_no = monthly.get("ISM_NEW_ORDER", 47.4)
-    if pmi <= 47.0: short_trig.append(f"🔴 [E1] 미 ISM 제조업: {pmi} (≤47.0 침체)")
-    if pmi_no <= 48.0: short_trig.append(f"🔴 [E2] 미 ISM 신규주문: {pmi_no} (≤48.0 선행 피크아웃)")
-
-    net_liq = data.get("NET_LIQUIDITY_USD_B")
-    net_liq_chg = data.get("NET_LIQUIDITY_4W_CHANGE_B")
-    if net_liq is not None and net_liq_chg is not None:
-        if net_liq_chg <= -100.0:
-            short_trig.append(f"🔴 [Hidden-A3] Net Liquidity: ${net_liq:,.0f}B (4주간 {net_liq_chg:+.0f}B 급감 — 유동성 축소)")
-            explanations.append("💥 [유동성 축소] 연준 B/S 감소 + TGA 재충전 + RRP 소진 겹치며 시중 실질 유동성이 마르는 국면.")
-        elif net_liq_chg >= 100.0:
-            long_trig.append(f"🟢 [Hidden-A3] Net Liquidity: ${net_liq:,.0f}B (4주간 {net_liq_chg:+.0f}B 급증 — 유동성 확장)")
-
-    return short_trig, long_trig, caution_list, explanations
-
-def calculate_macro_composite_score(short_trig, long_trig, leopold_score):
-    base_score = (len(long_trig) * 20) - (len(short_trig) * 15) - (leopold_score * 0.4)
-    macro_score = max(-100, min(100, int(base_score)))
-    
-    if macro_score <= -40:
-        alloc = "🚨 [자산배분 추천: 극강 숏] 주식(KOSPI) 10% | 달러/인버스 50% | 현금 40%"
-    elif macro_score >= 40:
-        alloc = "🚀 [자산배분 추천: 진바닥 롱] KOSPI200/반도체 ETF 80% | 현금 20%"
-    else:
-        alloc = "⚖️ [자산배분 추천: 중립/관망] 주식(KOSPI) 40% | 달러 20% | 현금 40%"
-        
-    return macro_score, alloc
-
-# ==========================================
-# 5. 메인 브리핑 모듈
-# ==========================================
-def run_macro_monitor(mode="MORNING"):
-    data = collect_macro_data()
-    short_trig, long_trig, caution_list, explanations = evaluate_conditions(data)
-    leopold_score, leopold_lvl, leopold_msg = compute_leopold_risk(data)
-    macro_score, alloc_recommendation = calculate_macro_composite_score(short_trig, long_trig, leopold_score)
-    kri_res = evaluate_liquidation_framework()
-    
-    u10 = data.get("US10Y", 0)
-    u10_hist = data.get("US10Y_HIST", pd.Series())
-    u10_consec = get_consecutive_days_count(u10_hist, threshold=4.5, condition=">=")
-
-    today_str = datetime.date.today().strftime('%Y-%m-%d')
-    now_str = datetime.datetime.now().strftime('%H:%M')
-
-    title = "🌅 [글로벌 매크로 & 강제청산 조기경보]" if mode == "MORNING" else "🌆 [글로벌 매크로 & 유동성 종합 리포트]"
-    msg = f"{title} ({today_str} {now_str})\n\n"
-    
-    msg += "📌 [핵심 매크로 수집 Summary]\n"
-    msg += f"• 미 10년물 금리: {u10:.2f}% ({u10_consec}영업일 연속 ≥4.5% 안착)\n"
-    msg += f"• 달러인덱스(DXY): {data.get('DXY', 0):.2f}pt\n"
-    msg += f"• 원/달러 환율: {data.get('USDKRW', 0):.1f}원 (주간: {data.get('USDKRW_WEEK_CHANGE', 0):+.1f}원)\n"
-    msg += f"• SOX 반도체지수: {data.get('SOX', 0):.1f}pt (52주 고점: {data.get('SOX_HIGH_52W', 0):.1f}pt)\n"
-    net_liq = data.get("NET_LIQUIDITY_USD_B")
-    net_liq_chg = data.get("NET_LIQUIDITY_4W_CHANGE_B")
-    if net_liq is not None:
-        chg_str = f" (4주 변화: {net_liq_chg:+.0f}B)" if net_liq_chg is not None else ""
-        msg += f"• Net Liquidity: ${net_liq:,.0f}B{chg_str}\n"
-    msg += "\n"
-
-    if explanations:
-        msg += "💡 [파급 효과 및 영향도 해설]\n" + "\n".join(explanations) + "\n\n"
-
-    if short_trig:
-        msg += "🚨 [발동된 Master 숏 트리거]\n" + "\n".join(short_trig) + "\n\n"
-    if long_trig:
-        msg += "🚀 [발동된 Master 롱 트리거]\n" + "\n".join(long_trig) + "\n\n"
-    if caution_list:
-        msg += "⚠️ [주의: 임계치 접근 유의 지표]\n" + "\n".join(caution_list) + "\n\n"
-
-    msg += f"🎯 [종합 매크로 스코어]: {macro_score}pt / 100pt\n"
-    msg += f"{alloc_recommendation}\n\n"
-
-    msg += f"🚨 [0. 포트폴리오 KRI 조기경보 엔진]: {kri_res['Tier']}\n"
-    msg += f"👉 실행 권고: {kri_res['Actions'][0]}\n\n"
-    
-    msg += f"📊 [포트폴리오 KRI 세부 정량 지표]\n"
-    msg += f"• 증거금 여유율(MC): {kri_res['Margin_Cushion']}%\n"
-    msg += f"• 청산 감내폭(B2L): {kri_res['Buffer_to_Liq']}%\n"
-    msg += f"• 청산 소요 기간(DTL): {kri_res['DTL']}일 (실질 청산가: ${kri_res['Effective_Liq_Price']})\n\n"
-    
-    msg += leopold_msg + "\n"
-
-    print(msg)
-    if send_telegram(msg):
-        print(f"[{mode}] 텔레그램 브리핑 메시지 전송 성공!")
-
-if __name__ == "__main__":
-    mode_arg = sys.argv[1] if len(sys.argv) > 1 else "MORNING"
-    run_macro_monitor(mode_arg)
+    if pmi <=
