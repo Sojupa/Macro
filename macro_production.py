@@ -114,7 +114,10 @@ def get_consecutive_days_count(series: pd.Series, threshold: float, condition: s
     return count
 
 def send_telegram(text):
-    if not TELEGRAM_TOKEN or not CHAT_ID: return False
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("❌ 실패 원인: TELEGRAM_TOKEN 또는 CHAT_ID 환경 변수가 비어 있습니다.")
+        return False
+        
     token_str = str(TELEGRAM_TOKEN).strip()
     match_token = re.search(r'(\d+:[A-Za-z0-9_-]+)', token_str)
     clean_token = match_token.group(1) if match_token else token_str.replace('https://api.telegram.org/bot', '').replace('[', '').replace(']', '').strip()
@@ -122,10 +125,19 @@ def send_telegram(text):
     
     url = f"https://api.telegram.org/bot{clean_token}/sendMessage"
     payload = {"chat_id": clean_chat_id, "text": text}
+    
     try:
         res = requests.post(url, data=payload, timeout=10)
-        return res.status_code == 200
-    except Exception:
+        res_json = res.json()
+        if res.status_code == 200 and res_json.get("ok"):
+            print("✅ 텔레그램 전송 성공!")
+            return True
+        else:
+            print(f"❌ 텔레그램 API 전송 실패! 상태 코드: {res.status_code}")
+            print(f"❌ 텔레그램 응답: {res.text}")
+            return False
+    except Exception as e:
+        print(f"❌ 텔레그램 요청 중 예외 발생: {e}")
         return False
 
 # ==========================================
