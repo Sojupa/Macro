@@ -6,7 +6,6 @@ import datetime
 import requests
 from dotenv import load_dotenv
 
-from credit_stress_detector import fetch_credit_stress_data, evaluate_credit_stress
 from liquidity_blood_pressure import fetch_liquidity_pressure_data, evaluate_liquidity_pressure
 from position_crowded import fetch_cot_sp500_position, evaluate_position_crowded
 
