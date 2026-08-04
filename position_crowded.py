@@ -1,5 +1,9 @@
 # ==========================================================
 # position_crowded.py - 몰빵 지도 (포지션 과밀도 - 문구 교정판)
+#
+# [2026-08-04 팩트체크] SP500_CONTRACT_CODE = "13874A"는 CME E-mini S&P 500
+# Stock Index의 CFTC 코드가 맞음 (CFTC TFF 리포트/tradingster 등 교차 확인 완료).
+# 코드 값 자체는 문제 없음 — 수정 없이 유지.
 # ==========================================================
 import os
 import datetime
@@ -15,6 +19,11 @@ TFF_DATASET_URL = "https://publicreporting.cftc.gov/resource/gpe5-46if.json"
 SP500_CONTRACT_CODE = "13874A"
 ZSCORE_WINDOW = 52
 
+THRESHOLDS = {
+    "LEV_FUND_NET_ZSCORE_HARD": 1.5,
+}
+
+
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not CHAT_ID:
         return False
@@ -24,6 +33,7 @@ def send_telegram(text):
         return res.status_code == 200
     except Exception:
         return False
+
 
 def fetch_cot_sp500_position():
     data = {}
@@ -35,6 +45,7 @@ def fetch_cot_sp500_position():
         }
         res = requests.get(TFF_DATASET_URL, params=params, timeout=15)
         if res.status_code != 200:
+            print(f"[position_crowded] CFTC API 응답 오류: {res.status_code}")
             return data
 
         rows = res.json()
@@ -64,6 +75,7 @@ def fetch_cot_sp500_position():
         print(f"[position_crowded] COT 데이터 수집 실패: {e}")
     return data
 
+
 def evaluate_position_crowded(data):
     alerts = []
     net = data.get("LEV_FUND_NET_SP500")
@@ -72,8 +84,8 @@ def evaluate_position_crowded(data):
     if net is not None and z is not None:
         pos_type = "순롱" if net >= 0 else "순숏"
         abs_net_str = f"{net:+,}계약" if net >= 0 else f"{net:,}계약"
-        
-        if abs(z) >= 1.5:
+
+        if abs(z) >= THRESHOLDS["LEV_FUND_NET_ZSCORE_HARD"]:
             if net < 0:
                 alerts.append(
                     f"🟡 [포지션 과밀-양면] 레버리지 펀드 S&P500 {pos_type} {abs_net_str} (52주 대비 {z:+.1f}σ 변화)\n"
@@ -86,6 +98,7 @@ def evaluate_position_crowded(data):
                 )
 
     return alerts
+
 
 def run_position_crowded():
     data = fetch_cot_sp500_position()
@@ -108,6 +121,7 @@ def run_position_crowded():
     print(msg)
     send_telegram(msg)
     return msg
+
 
 if __name__ == "__main__":
     run_position_crowded()

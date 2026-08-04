@@ -16,9 +16,20 @@ from fredapi import Fred
 load_dotenv()
 FRED_API_KEY = os.getenv("FRED_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+# [2026-08-04 수정] 다른 파일들과 달리 CHAT_ID만 읽고 TELEGRAM_CHAT_ID 폴백이
+# 없었음 — .env에 TELEGRAM_CHAT_ID로 통일해서 쓰고 있다면 이 파일만 조용히
+# 전송 실패하는 원인이 될 수 있어 다른 파일과 동일하게 맞춤.
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
 
 SOFR_IORB_ZSCORE_WINDOW = 60  # 최근 60영업일 평균/표준편차 기준 2-시그마 판정
+
+THRESHOLDS = {
+    "SOFR_IORB_ZSCORE_HARD": 2.0,
+    "SOFR_IORB_ZSCORE_CAUTION": 1.5,
+    # [추정] 2023 SVB 사태 당시 규모($150B) 대비 잠정 설정한 값. 원 코드 주석에서도
+    # 이미 "백테스트 미검증"이라고 명시했던 부분 — 그대로 유지하되 위치만 중앙화.
+    "PRIMARY_CREDIT_WOW_SPIKE": 10.0,
+}
 
 
 def send_telegram(text):
@@ -68,18 +79,18 @@ def evaluate_liquidity_pressure(data):
     z = data.get("SOFR_IORB_ZSCORE")
     spread = data.get("SOFR_IORB_SPREAD")
     if z is not None and spread is not None:
-        if abs(z) >= 2.0:
+        if abs(z) >= THRESHOLDS["SOFR_IORB_ZSCORE_HARD"]:
             alerts.append(
                 f"🚨 [레포 시장 경색] SOFR-IORB 스프레드 {spread:+.1f}bp (최근 {SOFR_IORB_ZSCORE_WINDOW}일 평균 대비 {z:+.1f}σ 돌파)"
             )
-        elif abs(z) >= 1.5:
+        elif abs(z) >= THRESHOLDS["SOFR_IORB_ZSCORE_CAUTION"]:
             alerts.append(f"⚠️ [유의] SOFR-IORB 스프레드 {spread:+.1f}bp ({z:+.1f}σ, 경계 구간 근접)")
 
     pc = data.get("PRIMARY_CREDIT_USD_B")
     pc_chg = data.get("PRIMARY_CREDIT_WOW_CHANGE_B")
     if pc is not None and pc_chg is not None:
         # [추정] 임계치는 2023 SVB 사태 당시 규모($150B) 대비 잠정 설정, 백테스트 미검증
-        if pc_chg >= 10.0:
+        if pc_chg >= THRESHOLDS["PRIMARY_CREDIT_WOW_SPIKE"]:
             alerts.append(f"🚨 [은행 비상창구] Primary Credit 잔액 ${pc:,.1f}B (전주 대비 {pc_chg:+.1f}B 급증 — 은행권 자금 스트레스 신호)")
 
     return alerts
@@ -98,6 +109,8 @@ def run_liquidity_blood_pressure():
         chg = data.get("PRIMARY_CREDIT_WOW_CHANGE_B")
         chg_str = f" (전주 대비 {chg:+.1f}B)" if chg is not None else ""
         msg += f"• Primary Credit(재할인창구) 잔액: ${data['PRIMARY_CREDIT_USD_B']:,.1f}B{chg_str}\n"
+    if not data:
+        msg += "⚪ FRED_API_KEY 미설정 또는 수집 실패 — 데이터 없음\n"
     msg += "\n"
 
     if alerts:

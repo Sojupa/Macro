@@ -14,6 +14,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
 
+
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not CHAT_ID:
         print("❌ [오류] 텔레그램 토큰 또는 CHAT_ID가 설정되지 않았습니다.")
@@ -26,17 +27,18 @@ def send_telegram(text):
         print(f"❌ 텔레그램 전송 예외: {e}")
         return False
 
+
 def run_combined_financial_stress_report():
     today_str = datetime.date.today().strftime("%Y-%m-%d")
-    
+
     # 1. 신용 경색 데이터
     c_data = fetch_credit_stress_data()
     c_alerts = evaluate_credit_stress(c_data)
-    
+
     # 2. 유동성 혈압계 데이터
     l_data = fetch_liquidity_pressure_data()
     l_alerts = evaluate_liquidity_pressure(l_data)
-    
+
     # 3. 몰빵 지도(포지션 과밀도) 데이터
     p_data = fetch_cot_sp500_position()
     p_alerts = evaluate_position_crowded(p_data)
@@ -54,9 +56,11 @@ def run_combined_financial_stress_report():
     if "MOVE_INDEX" in c_data:
         z_str = f" ({c_data['MOVE_ZSCORE']:+.1f}σ)" if "MOVE_ZSCORE" in c_data else ""
         msg += f"• MOVE 지수: {c_data['MOVE_INDEX']:.1f}{z_str}\n"
+    if not c_data:
+        msg += "⚪ 데이터 미확보\n"
     msg += "\n"
 
-    # [2] 단기 유동성 & 은행 창구
+    # [2] 단기 자금 & 은행 유동성
     msg += "📌 2. 단기 자금 & 은행 유동성 (Repo & Bank)\n"
     if "SOFR_IORB_SPREAD" in l_data:
         z_str = f" ({l_data['SOFR_IORB_ZSCORE']:+.1f}σ)" if "SOFR_IORB_ZSCORE" in l_data else ""
@@ -65,9 +69,11 @@ def run_combined_financial_stress_report():
         chg = l_data.get("PRIMARY_CREDIT_WOW_CHANGE_B")
         chg_str = f" (전주 대비 {chg:+.1f}B)" if chg is not None else ""
         msg += f"• Primary Credit 잔액: ${l_data['PRIMARY_CREDIT_USD_B']:,.1f}B{chg_str}\n"
+    if not l_data:
+        msg += "⚪ FRED_API_KEY 미설정 또는 데이터 미확보\n"
     msg += "\n"
 
-    # [3] 포지션 과밀도 (COT) - 📌 Z-Score 변수 오타 수정 완료
+    # [3] 포지션 과밀도 (COT)
     msg += "📌 3. 포지션 쏠림 (CFTC COT)\n"
     if "LEV_FUND_NET_SP500" in p_data:
         z_str = f" ({p_data['LEV_FUND_NET_ZSCORE']:+.1f}σ)" if "LEV_FUND_NET_ZSCORE" in p_data else ""
@@ -89,6 +95,7 @@ def run_combined_financial_stress_report():
         print("✅ 금융 스트레스 통합 리포트 전송 성공!")
     else:
         print("❌ 텔레그램 전송 실패")
+
 
 if __name__ == "__main__":
     run_combined_financial_stress_report()
